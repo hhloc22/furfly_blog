@@ -2,27 +2,63 @@ const express = require('express');
 const mysql = require('mysql2');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
+const AWS = require('aws-sdk');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Kết nối MySQL
-const db = mysql.createConnection({
-    host: 'localhost',
-    port: 3307,
-    user: 'root',
-    password: 'h0huul0c',
-    database: 'webblog'
+// Khởi tạo AWS SSM để truy cập Parameter Store
+const ssm = new AWS.SSM({
+    region: 'us-east-1' // Thay bằng region của bạn
 });
 
-db.connect((err) => {
-    if (err) {
-        console.error('Lỗi kết nối database:', err);
-        return;
+// Hàm lấy thông tin kết nối từ Parameter Store
+async function getDbConfig() {
+    const params = {
+        Names: [
+            '/webblog/db/host',
+            '/webblog/db/port',
+            '/webblog/db/user',
+            '/webblog/db/password',
+            '/webblog/db/database'
+        ],
+        WithDecryption: true
+    };
+    const response = await ssm.getParameters(params).promise();
+    const config = {};
+    response.Parameters.forEach(param => {
+        const key = param.Name.split('/').pop();
+        config[key] = param.Value;
+    });
+    return config;
+}
+
+// Khởi tạo kết nối MySQL
+let db;
+(async () => {
+    try {
+        const dbConfig = await getDbConfig();
+        db = mysql.createConnection({
+            host: dbConfig.host,
+            port: parseInt(dbConfig.port),
+            user: dbConfig.user,
+            password: dbConfig.password,
+            database: dbConfig.database
+        });
+
+        db.connect((err) => {
+            if (err) {
+                console.error('Lỗi kết nối database:', err);
+                return;
+            }
+            console.log('Đã kết nối thành công đến MySQL');
+        });
+    } catch (err) {
+        console.error('Lỗi khi lấy thông tin từ Parameter Store:', err);
+        process.exit(1); // Thoát nếu không lấy được thông tin
     }
-    console.log('Đã kết nối thành công đến MySQL');
-});
+})();
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -119,7 +155,7 @@ app.post('/api/blogs', (req, res) => {
                 if (err) {
                     return res.status(500).json({ error: 'Lỗi server' });
                 }
-                res.status(201).json({ 
+                res.status(201  res.status(201).json({ 
                     message: 'Tạo blog thành công',
                     blog_id: results.insertId
                 });
@@ -272,4 +308,4 @@ app.get('/api/users/:username', (req, res) => {
 const PORT = 5000;
 app.listen(PORT, () => {
     console.log(`Server đang chạy tại port ${PORT}`);
-}); 
+});
